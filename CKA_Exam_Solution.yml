@@ -1,0 +1,381 @@
+#1. ClusterRole:
+
+You have been asked to create a new ClusterRole for a deployment pipeline and bind it to a specific ServiceAccount scoped to a namespace :
+
+Create a new clusterrole named "deployment-clusterone" which only allows to create the following resources:
+-	Deployment
+-	StatefulSet
+- DaemonSet
+
+Create a new service account named "cicd-token" in the existing namespace "app-team":
+
+Bind the new clusterrole “deployment-clusterone” to she new service account "cicd-token”, limited to namespace "app-team1":
+
+
+kubectl create clusterrole deployment-clusterone --verb=create --resource=Deployment,StatefulSet,DaemonSet
+
+kubectl describe clusterrole deployment-clusterone
+
+kubectl create ns app-team
+
+kubectl create serviceaccount cicd-token -n app-team1
+
+kubectl describe serviceaccounts -n app-team1 cicd-token
+
+kubectl create clusterrolebinding deployment-clusterone --clusterrole=deployment-clusterone --serviceaccount=app-team1:cicd-token
+
+kubectl describe clusterrolebindings.rbac.authorization.k8s.io deployment-clusterone
+
+#2. Drain Node:
+
+Set the node named "ek8s-node-1" as unavailable and reschedule all the pods running on it:
+
+kubectl cordon ek8s-node-1
+
+kubectl drain ek8s-node-1 --delete-local-data --ignore-daemonsets
+
+#3. etcd back and restore:
+
+Create a snapshot of she existing etcd instance running at https://127.0.0.1:2379, saving the snapshot to /data/backup/somefile.db:
+Restore an existing, previous snapshot located at /var/lib/backup/somefi1e.db:
+
+
+ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 snapshot save /data/backup/etcdb.db   --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key
+
+ETCDCTL_API=3 etcdctl --write-out=table snapshot status etcdb.db
+
+ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 snapshot restore /var/lib/backup/somefi1e.db --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key
+
+#4. Network Policy
+
+Create a new NetworkPolicy named allow-port-from-namespace in the existing namespace echo. Ensure that the new NetworkPolicy allows Pods in namespace my-app to connect to port 9000 of Pods in namespace echo:
+
+Further ensure that the new NetworkPolicy:
+
+•	does not allow access to Pods, which don't listen on port 9000
+
+•	does not allow access from Pods, which are not in namespace my-app
+
+Solution:
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-port-from-namespace
+  namespace: echo
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          project: myproject
+    ports:
+    - protocol: TCP
+      port: 9000
+
+#5. Deployment and Service Creation
+
+Reconfigure a existing deployment "front-end" and add a port specification named "http" exposing port 80/tcp of existing container "nginx":
+       create a new service named "front-end-svc" exposing the container port "http" 
+       Configure the new service to also expose individual pods via a NodePort on the nodes on which they are scheduled
+
+
+Get the running deployment (front-end) yaml file:
+
+kubectl get deployments.apps front-end -o yaml > front-end.yaml
+
+Edit the yaml file to add the port details:
+
+    spec:
+      containers:
+      - image: nginx
+        imagePullPolicy: Always
+        name: nginx
+        ports:
+        - containerPort: 80
+          name: http
+
+save it.
+
+Delete the exiting deployment:
+
+kubectl delete deployments.apps front-end
+
+create the deployment using updated yaml file:
+
+kubectl create -f front-end.yaml
+
+Create the service based on deployment:
+
+kubectl expose deployment front-end --name front-end-svc --port 80 --target-port 80 --type NodePort
+
+
+#6. Ingress:
+
+Create a new nginx Ingress resource as follows:
+
+•	Name: ping
+
+•	Namespace: ing-internal
+
+•	Exposing service hi on path /hi using service port 5678
+
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ping
+  namespace: ing-internal
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /hi
+        pathType: Prefix
+        backend:
+          service:
+            name: hi
+            port:
+              number: 5678
+
+
+#7. Scale the deployment:
+
+Scale the deployment front-end to 4 pods:
+
+root@control:~# kubectl get deploy
+NAME        READY   UP-TO-DATE   AVAILABLE   AGE
+front-end   1/1     1            1           22h
+root@control:~#
+
+root@control:~# kubectl scale deployment front-end --replicas=4
+deployment.apps/front-end scaled
+
+root@control:~# kubectl get deploy
+NAME        READY   UP-TO-DATE   AVAILABLE   AGE
+front-end   4/4     4            4           22h
+root@control:~# 
+
+#8. Node Selector:
+
+Schedule	a	pod	as	fo11ows :
+Name:	nginx - kusc007
+disk=spinning
+
+
+root@control:~# cat nodesel.yml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-kusc007
+  labels:
+    env: test
+spec:
+  containers:
+  - name: nginx-kusc007
+    image: nginx
+    imagePullPolicy: IfNotPresent
+  nodeSelector:
+    disk: spining
+
+root@control:~# kubectl create -f nodesel.yml
+pod/nginx-kusc007 created
+
+#9. Checking Node status:
+
+Check to see how many nodes are ready (not including nodes tainted NoSchedule ) and write the number to /opt/KUSC00402/kusc00402.txt:
+
+
+root@control:~# kubectl get nodes
+NAME      STATUS   ROLES    AGE   VERSION
+control   Ready    master   24h   v1.18.8
+node2     Ready    <none>   23h   v1.18.8
+nodeone   Ready    <none>   24h   v1.18.8
+
+root@control:~# kubectl describe nodes control|grep -i taints
+Taints:             node-role.kubernetes.io/master:NoSchedule
+root@control:~#
+root@control:~# kubectl describe nodes node2|grep -i taints
+Taints:             <none>
+root@control:~# kubectl describe nodes nodeone|grep -i taints
+Taints:             <none>
+root@control:~#
+
+root@control:~# echo 2 > /opt/KUSC00402/kusc00402.txt
+root@control:~# cat /opt/KUSC00402/kusc00402.txt
+2 
+
+#10. Multicontainer Pod:
+
+Create a pod named kucc1 with app container for each of the following images running inside nginx + redis :
+
+root@controlplane:~# cat kucc1.yaml 
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kucc1
+spec:
+  containers:
+  - image: nginx
+    name: nginx
+  - image: redis
+    name: redis  
+
+#11. PV creation:
+
+Create a persistent volume with name app-data , of capacity 1Gi and access mode ReadOnlyMany. The type of volume is hostPath and its location is /srv/app-data :
+
+root@controlplane:~# cat pv.yaml 
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: app-config
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  hostPath:
+      path: "/srv/app-config"
+root@controlplane:~# 
+
+#12. PVC Creation:
+
+Create a new PersistentVolumeClaim
+
+•	Name: pv-volume
+
+•	Class: csi-hostpath-sc
+
+•	Capacity: 10Mi
+
+Create a new Pod which mounts the PersistentVolumeClaim as a volume:
+
+•	Name: web-server
+
+•	Image: nginx
+
+•	Mount path: /usr/share/nginx/html
+
+Configure the new Pod to have ReadWriteOnce access on the volume.
+
+Finally, using kubectl edit or kubectl patch expand the PersistentVolumeClaim to a capacity of 70Mi and record that change.
+
+
+
+root@controlplane:~# cat pvc.yaml 
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pv-volume
+spec:
+  storageClassName: csi-hostpath-sc
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Mi
+root@controlplane:~# 
+
+root@controlplane:~# cat pod-pvc.yaml 
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-server
+spec:
+  volumes:
+    - name: my-volume
+      persistentVolumeClaim:
+        claimName: pv-volume
+  containers:
+    - name: web-server
+      image: nginx
+      volumeMounts:
+        - mountPath: "/usr/share/nginx/html"
+          name: my-volume
+
+# kubectl edit pvc pv-volume --record
+
+#13. Monitor the log:
+Monitor the logs of pod bar and:
+
+•	Extract log lines corresponding to error file-not-found
+
+•	Write them to /opt/KUTR00101/bar 
+
+kubectl logs bar | grep -i error | tee /some/path/filename
+
+#14. Sidecar container:
+
+# Getting the Running container (legacy-app) yaml file , using below command:
+
+kubectl get pod legacy-app -o yaml > sidecar.yaml
+
+# Now we need to add the additional container into exiting pod:
+
+kubectl run busybox --image busybox --command "/bin/sh -c tail -n+1 -f /var/log/big-corp-app.log" --dry-run=client -o yaml > busybox.yaml
+
+cat busybox.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: null
+  labels:
+    run: busybox
+  name: busybox
+spec:
+  containers:
+  - command:
+    - /bin/sh -c tail -n+1 -f /var/log/big-corp-app.log
+    image: busybox
+    name: busybox
+    volumeMounts:
+    - mountPath: /var/log/legacy-app.log
+      name: logs
+
+# Now add the container section into exiting pod yaml file
+
+spec:
+  containers:
+  - command:
+    - /bin/sh -c tail -n+1 -f /var/log/big-corp-app.log
+    image: busybox
+    name: busybox
+    volumeMounts:
+    - mountPath: /var/log/legacy-app.log
+      name: logs
+
+# Delete the exiting pod and recreate using updated pod file
+
+#15. Getting Pod high CPU information:
+
+From the pod label name=cpu-utilizer, find pods running high CPU workloads and write the name of the pod consuming most CPU to the file /opt/KUTR00401/KUTR00401.txt (which already exists):
+
+kubectl top pod -l name=cpu-utilizer
+
+Find the which pod consuming high cpu and copy the pod name and paste into /some/path/filename
+
+echo 'pod name' > /some/path/filename
+
+#16. Troubleshoot Node
+
+systemctl restart kubelet
+systemctl enable kubelet
+
+#17.kubeadm upgrade
+
+apt-mark unhold kubeadm && \
+apt-get update && apt-get install -y kubeadm=1.21.x-00 && \
+apt-mark hold kubeadm
+
+kubeadm upgrade apply v1.21.0
+
+apt-mark unhold kubelet kubectl && \
+apt-get update && apt-get install -y kubelet=1.21.0-00 kubectl=1.21.0-00 && \
+apt-mark hold kubelet kubectl
